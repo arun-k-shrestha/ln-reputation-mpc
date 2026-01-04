@@ -1,4 +1,5 @@
 # Code adapted from the original implementation by Sindura Saraswathi
+# line: xyz cointains the MPC check.
 
 import datetime
 import networkx as nx
@@ -527,7 +528,6 @@ def callable(source, target, amt, result, name):
                 fee = round(fee, 5)
 
                 if G.nodes[u]["honest"] == False: # HTLC will fail anyway, if node is dishonest
-                    print("malicious")
                     failure +=1
                     return [path, total_fee, total_delay, path_length, 'Failure']
                 if amount <= 0:
@@ -537,7 +537,8 @@ def callable(source, target, amt, result, name):
                 cap = G.edges[u, v]["capacity"]
                 upper = cap + max(1, int(amount))
                 if not Yao_MPC.Yao_Millionaires_Protocol(amount, bal, upper, 40):
-                    # failure += 1
+                    # failure += 1 
+                    # important: we are not couting failure because this is pre-check not system failure.
                     return [path, total_fee, total_delay, path_length, 'Failure']
                 # else:
                     # G.edges[u,v]["Balance"] -= amount
@@ -726,7 +727,7 @@ if __name__ == '__main__':
         i = i+1
 
 
-    pool = mp.Pool(processes=8)
+    pool = mp.Pool(processes=2)
     a = pool.starmap(callable, work)
     pool.close()
     pool.join()

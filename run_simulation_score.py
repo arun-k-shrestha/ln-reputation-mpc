@@ -63,7 +63,49 @@ for bls in bimodal_scales:
     
 lnd_scale = 3e5
 
+# ---------------- Rating system (decayed S/F + Beta smoothing) ----------------
+RATING_HALF_LIFE_H = 1.0   # H = 1 → after 1 new event, past evidence is worth 50% H = 2 → after 2 new events, past evidence is worth 50% (then H=1 will be 70.7)
+RATING_ALPHA = 1.0         # Laplace prior alpha
+RATING_BETA  = 1.0         # Laplace prior beta
+MIN_RELIABILITY = 0.05     # below this, the sender avoids the node (optional
+
 #---------------------------------------------------------------------------
+
+
+def decay_factor(H: float): # H = 1 will yeild 0.5 and H = 2 will yeild 0.707
+    H = max(float(H), 1e-9) # 1e-9, a small value, so that H > 0
+    return 2.0 ** (-1.0 / H)
+
+
+def update_reliability(G, sender: int, node: int, success: bool,
+                       H: float = RATING_HALF_LIFE_H,
+                       alpha: float = RATING_ALPHA,
+                       beta: float = RATING_BETA):
+    ratings = G.nodes[sender].setdefault("rating", {}) # just in case the node doesn't have rating ledger
+    rec = ratings.get(node, {"S": 0.0, "F": 0.0, "p": alpha / (alpha + beta)}) # default is S=0.0, F=0.0 if not history found
+
+    gamma = decay_factor(H)
+    S = rec["S"] * gamma
+    F = rec["F"] * gamma
+
+    if success:
+        S += 1.0
+    else:
+        F += 1.0
+
+    p_hat = (alpha + S) / (alpha + beta + S + F)
+    rec.update({"S": S, "F": F, "p": p_hat})
+    ratings[node] = rec
+    return p_hat
+
+def get_reliability(G, sender: int, node: int,
+                    alpha: float = RATING_ALPHA,
+                    beta: float = RATING_BETA):
+    rec = G.nodes[sender].get("rating", {}).get(node)
+    if not rec:
+        return alpha / (alpha + beta)  # (0.5 if alpha=beta=1) -> for new node with no rating
+    return float(rec.get("p", alpha / (alpha + beta)))
+
 def make_graph(G):
     df = pd.read_csv('LN_snapshot.csv')
     is_multi = df["short_channel_id"].value_counts() > 1
@@ -71,7 +113,7 @@ def make_graph(G):
     node_num = {}
     nodes_pubkey = list(OrderedSet(list(df['source']) + list(df['destination'])))
     for i in range(len(nodes_pubkey)):
-        G.add_node(i, honest = True, score={})
+        G.add_node(i, honest=True, rating={}, score={})
         pubkey = nodes_pubkey[i]
         G.nodes[i]['pubkey'] = pubkey
         node_num[pubkey] = i
@@ -423,6 +465,10 @@ def callable(source, target, amt, result, name):
     def lnd_cost(v,u,d):
         global prob_check, prob_dict#new
         global timepref, case
+
+        if get_reliability(G, source, v) < MIN_RELIABILITY:
+            return float('inf'), float('inf') # (distance, cost) -> (fees+delay, probability+penalty)
+    
         compute_fee(v,u,d)        
         timepref *= 0.9
         defaultattemptcost = attemptcost+attemptcostppm*amt_dict[(u,v)]/1000000
@@ -499,12 +545,20 @@ def callable(source, target, amt, result, name):
         nonlocal success, failure
         try:
             amt_list = []
+            mpc_passed_hops = set()  # tracks hops (u,v) that passed MPC in this attempt
             total_fee = 0
             total_delay = 0
             path_length = len(path)
             for i in range(path_length-1):
                 v = path[i]
                 u = path[i+1]
+
+                # Fail fast if sender distrusts the next-hop v
+                if get_reliability(G, source, v) < MIN_RELIABILITY:
+                    update_reliability(G, source, v, success=False)  # optional penalty
+                    failure += 1
+                    return [path, total_fee, total_delay, path_length, 'Failure']
+                
                 if v == target:
                     amt_list.append(amt)
                 fee = G.edges[u,v]["BaseFee"] + amt_list[-1]*G.edges[u,v]["FeeRate"]
