@@ -21,6 +21,7 @@ import scipy.optimize as opt
 import pickle
 import random
 import time
+import Yao_MPC
 
 
 config = configparser.ConfigParser()
@@ -555,8 +556,6 @@ def callable(source, target, amt, result, name):
 
                 # Fail fast if sender distrusts the next-hop v
                 if get_reliability(G, source, v) < MIN_RELIABILITY:
-                    update_reliability(G, source, v, success=False)  # optional penalty
-                    failure += 1
                     return [path, total_fee, total_delay, path_length, 'Failure']
                 
                 if v == target:
@@ -580,29 +579,43 @@ def callable(source, target, amt, result, name):
                     fee = 0
                 fee = round(fee, 5)
 
+                # This is a real failure (system failure) because it's misbehavior.
                 if G.nodes[u]["honest"] == False:
+                    failure += 1
+                    update_reliability(G, source, u, success=False)  # penalize malicious node
                     return [path, total_fee, total_delay, path_length, 'Failure']
-                if amount > G.edges[u,v]["Balance"] or amount<=0:
-                    # G.edges[u,v]["LastFailure"] = 0
-                    # if amount < G.edges[u,v]["UpperBound"]:
-                    #     G.edges[u,v]["UpperBound"] = amount #new
-                    # j = i-1
-                    # release_locked(j, path)
-                    failure +=1
+                
+                bal = G.edges[u, v]["Balance"]
+                cap = G.edges[u, v]["capacity"]
+                upper = cap + max(1, int(amount))
+                # important: we are not couting failure because this is pre-check not system failure.
+                if not Yao_MPC.Yao_Millionaires_Protocol(amount, bal, upper, 40):
+                    # failure += 1 
                     return [path, total_fee, total_delay, path_length, 'Failure']
-                # else:
-                    # G.edges[u,v]["Balance"] -= amount
-                    # G.edges[u,v]["Locked"] = amount  
-                    # G.edges[u,v]["LastFailure"] = 100
-                    # if G.edges[u,v]["LowerBound"] < amount:
-                    #     G.edges[u,v]["LowerBound"] = amount #new
+                mpc_passed_hops.add((u, v))
+
+                if amount > G.edges[u, v]["Balance"] or amount <= 0:
+                    failure += 1
+                    # penalize the hop that "looked ok under MPC" but failed during HTLC
+                    # choose to penalize v (next-hop) OR u (forwarder). Here: penalize v.
+                    update_reliability(G, source, v, success=False)
+                    return [path, total_fee, total_delay, path_length, 'Failure']
+
                 amount = round(amount - fee, 5)
-                if v == target and amount!=amt:
-                    failure +=1
+
+                # Another "during" failure after MPC passed
+                if v == target and amount != amt:
+                    failure += 1
+                    # penalize the last hop actor; here: penalize u (forwarder)
+                    update_reliability(G, source, u, success=False)
                     return [path, total_fee, total_delay, path_length, 'Failure']
           
             # release_locked(i-1, path)
             success += 1
+            # reward nodes on the successful path (excluding sender)
+            for node in path[1:]:
+                update_reliability(G, source, node, success=True)
+            print(G.nodes[source]["rating"])
             return [path, total_fee, total_delay, path_length, 'Success']
         except Exception as e:
             print(e)

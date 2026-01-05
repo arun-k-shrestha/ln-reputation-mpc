@@ -527,7 +527,6 @@ def callable(source, target, amt, result, name):
                 fee = round(fee, 5)
 
                 if G.nodes[u]["honest"] == False:
-                    print("malicious")
                     failure +=1
                     return [path, total_fee, total_delay, path_length, 'Failure']
                 if amount > G.edges[u,v]["Balance"] or amount<=0:
