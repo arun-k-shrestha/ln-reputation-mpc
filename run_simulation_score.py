@@ -43,6 +43,8 @@ src_type = config['General']['source_type']
 dst_type = config['General']['target_type']
 amt_type = config['General']['amount_type']
 percent_malicious = float(config['General']['malicious_percent'])
+NUM_LEARNING_SENDERS = int(config['General'].get('num_learning_senders', 10))
+TRANSACTIONS_PER_SENDER = int(config['General'].get('transactions_per_sender', 10))
 
 #LND
 attemptcost = int(config['LND']['attemptcost'])/1000
@@ -578,22 +580,18 @@ def callable(source, target, amt, result, name):
                 if u==source:
                     fee = 0
                 fee = round(fee, 5)
-
-                # This is a real failure (system failure) because it's misbehavior.
-                if G.nodes[u]["honest"] == False:
-                    failure += 1
-                    update_reliability(G, source, u, success=False)  # penalize malicious node
-                    return [path, total_fee, total_delay, path_length, 'Failure']
                 
                 bal = G.edges[u, v]["Balance"]
                 cap = G.edges[u, v]["capacity"]
                 upper = cap + max(1, int(amount))
                 # important: we are not couting failure because this is pre-check not system failure.
-                if not Yao_MPC.Yao_Millionaires_Protocol(amount, bal, upper, 40):
-                    # failure += 1 
-                    return [path, total_fee, total_delay, path_length, 'Failure']
+                if G.nodes[u].get("honest", True): # only checking honest node because the dishonest node will bypass this
+                    if not Yao_MPC.Yao_Millionaires_Protocol(amount, bal, upper, 40):
+                        # failure += 1 
+                        return [path, total_fee, total_delay, path_length, 'Failure']
                 mpc_passed_hops.add((u, v))
 
+                # even after the MPC check, if it fails, we provide them a bad rating. This will be true for dishonest node
                 if amount > G.edges[u, v]["Balance"] or amount <= 0:
                     failure += 1
                     # penalize the hop that "looked ok under MPC" but failed during HTLC
@@ -607,7 +605,7 @@ def callable(source, target, amt, result, name):
                 if v == target and amount != amt:
                     failure += 1
                     # penalize the last hop actor; here: penalize u (forwarder)
-                    update_reliability(G, source, u, success=False)
+                    update_reliability(G, source, v, success=False)
                     return [path, total_fee, total_delay, path_length, 'Failure']
           
             # release_locked(i-1, path)
@@ -744,50 +742,117 @@ if __name__ == '__main__':
             tgt_max = max(tgt_max, G.edges[edges]['Balance'])
         upper_bound = int(min(src_max, tgt_max))
         return upper_bound
-        
+    
+    print("\n" + "="*80)
+    print("LEARNING SENDER EXPERIMENT")
+    print("="*80)
+    print(f"Number of learning senders: {NUM_LEARNING_SENDERS}")
+    print(f"Transactions per sender: {TRANSACTIONS_PER_SENDER}")
+    print(f"Total transactions: {NUM_LEARNING_SENDERS * TRANSACTIONS_PER_SENDER}")
+    print(f"Malicious nodes: {percent_malicious*100:.1f}%")
+    print("="*80 + "\n")
+
+    
+    well_node, fair_node, poor_node = node_classifier()
+
+    print(f"Total nodes - Well: {len(well_node)}, Fair: {len(fair_node)}, Poor: {len(poor_node)}")
+    
+    # Stratified selection of learning senders
+    num_hub = min(12, len(well_node))
+    num_medium = min(16, len(fair_node))
+    num_peripheral = min(12, len(poor_node))
+
+    # Adjust if we can't get exactly NUM_LEARNING_SENDERS
+    total_available = num_hub + num_medium + num_peripheral
+    if total_available < NUM_LEARNING_SENDERS:
+        print(f"Warning: Only {total_available} suitable senders found")
+        NUM_LEARNING_SENDERS = total_available
+    
+    learning_senders = {
+        'hub': random.sample(well_node, num_hub) if len(well_node) >= num_hub else well_node,
+        'medium': random.sample(fair_node, num_medium) if len(fair_node) >= num_medium else fair_node,
+        'peripheral': random.sample(poor_node, num_peripheral) if len(poor_node) >= num_peripheral else poor_node
+    }
+
+    all_learning_senders = (learning_senders['hub'] + 
+                           learning_senders['medium'] + 
+                           learning_senders['peripheral'])
+    
+    print(f"\nSelected {len(all_learning_senders)} learning senders:")
+    print(f"  Hub nodes: {len(learning_senders['hub'])}")
+    print(f"  Medium nodes: {len(learning_senders['medium'])}")
+    print(f"  Peripheral nodes: {len(learning_senders['peripheral'])}")
+
+
+    i = 0
+         
     work = []              
     result_list = [] 
     prob_dict = {}
     
-    well_node, fair_node, poor_node = node_classifier()
-    i = 0
-    
     algos = config['General']['algos'].split('|')
     amt_end_range = int(config['General']['amt_end_range'])
-    #uniform random amount selection
-    while i<epoch:
-        if amt_type == 'fixed':
-            amt = int(config['General']['amount'])
-            
-        elif amt_type == 'random':
-            k = (i%amt_end_range)+1 #i%6 for fair node else i%8 
-            amt = rn.randint(10**(k-1), 10**k)
-            
-            # k = (i%3)+5#comment this
-            # amt = rn.randint(10**(k-1), 10**k)#comment this
-            
-        result = {}
-        source = -1
-        target = -1
-        while (target == source or (source not in G.nodes()) or (target not in G.nodes())):
-            source = node_selector(src_type)
+    
+    print("\nBuilding transaction list...")
+    
+    # For each learning sender, create their transaction sequence
+    for sender in all_learning_senders:
+        # Determine sender type for tracking
+        if sender in learning_senders['hub']:
+            sender_type = 'hub'
+        elif sender in learning_senders['medium']:
+            sender_type = 'medium'
+        else:
+            sender_type = 'peripheral'
+        
+        # Each sender performs TRANSACTIONS_PER_SENDER transactions
+        for tx_num in range(TRANSACTIONS_PER_SENDER):
+            # Select target
             target = node_selector(dst_type)
-        
-        if not(node_ok(source, target)):
-            continue 
-
-        if i%100==0:   
-            print("\nSource = ",source, "Target = ", target, "Amount=", amt, 'Epoch =', i)
-            print("----------------------------------------------")
-        result['Source'] = source
-        result['Target'] = target
-        result['Amount'] = amt
-        # result['upper bound'] = cap
-        
-        # for algo in algos:#uncomment
-        #     work.append((source, target, amt, result, algo))
-        work.append((source, target, amt, result, 'LND')) #new
-        i = i+1
+            
+            # Ensure valid source-target pair
+            max_retries = 100
+            retry_count = 0
+            while (target == sender or 
+                   target not in G.nodes() or 
+                   sender not in G.nodes()):
+                target = node_selector(dst_type)
+                retry_count += 1
+                if retry_count > max_retries:
+                    break
+            
+            if retry_count > max_retries:
+                continue
+            
+            # Amount selection
+            if amt_type == 'fixed':
+                amt = int(config['General']['amount'])
+            elif amt_type == 'random':
+                k = (tx_num % amt_end_range) + 1
+                amt = rn.randint(10**(k-1), 10**k)
+            
+            # Check if transaction is feasible
+            if not node_ok(sender, target):
+                continue
+            
+            # Progress indicator
+            if len(work) % 10000 == 0 and len(work) > 0:
+                print(f"  Generated {len(work)} transactions...")
+            
+            # Build result dictionary with tracking info
+            result = {
+                'Source': sender,
+                'Target': target,
+                'Amount': amt,
+                'SenderType': sender_type,
+                'TxNumber': tx_num,
+                'TotalTxSoFar': len(work)
+            }
+            
+            work.append((sender, target, amt, result, 'LND'))
+    
+    print(f"\nTotal valid transactions generated: {len(work)}")
+    print(f"Starting parallel execution with 8 processes...\n")
 
 
     pool = mp.Pool(processes=8)
