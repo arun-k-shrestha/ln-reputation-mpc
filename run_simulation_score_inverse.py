@@ -44,7 +44,7 @@ dst_type = config['General']['target_type']
 amt_type = config['General']['amount_type']
 percent_malicious = float(config['General']['malicious_percent'])
 NUM_LEARNING_SENDERS = int(config['General'].get('num_learning_senders', 40))
-TRANSACTIONS_PER_SENDER = int(config['General'].get('transactions_per_sender', 10))
+TRANSACTIONS_PER_SENDER = int(config['General'].get('transactions_per_sender', 25))
 
 #LND
 attemptcost = int(config['LND']['attemptcost'])/1000
