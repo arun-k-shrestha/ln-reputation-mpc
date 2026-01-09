@@ -546,6 +546,9 @@ def callable(source, target, amt, result, name):
                     # G.edges[u,v]["LastFailure"] = 100
                     # if G.edges[u,v]["LowerBound"] < amount:
                     #     G.edges[u,v]["LowerBound"] = amount #new
+                if not G.nodes[u].get("honest",True):
+                    failure += 1 
+                    return [path, total_fee, total_delay, path_length, 'Failure']
                 amount = round(amount - fee, 5)
                 if v == target and amount!=amt:
                     failure +=1

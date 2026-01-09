@@ -598,6 +598,11 @@ def callable(source, target, amt, result, name):
                         return [path, total_fee, total_delay, path_length, 'Failure']
                 mpc_passed_hops.add((u, v))
 
+                if not G.nodes[u].get("honest",True):
+                    failure += 1 
+                    update_reliability(G, source, v, success=False)
+                    return [path, total_fee, total_delay, path_length, 'Failure']
+
                 # even after the MPC check, if it fails, we provide them a bad rating. This will be true for dishonest node
                 if amount > G.edges[u, v]["Balance"] or amount <= 0:
                     failure += 1

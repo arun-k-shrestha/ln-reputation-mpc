@@ -43,7 +43,7 @@ src_type = config['General']['source_type']
 dst_type = config['General']['target_type']
 amt_type = config['General']['amount_type']
 percent_malicious = float(config['General']['malicious_percent'])
-NUM_LEARNING_SENDERS = int(config['General'].get('num_learning_senders', 10))
+NUM_LEARNING_SENDERS = int(config['General'].get('num_learning_senders', 40))
 TRANSACTIONS_PER_SENDER = int(config['General'].get('transactions_per_sender', 10))
 
 #LND
@@ -605,6 +605,16 @@ def callable(source, target, amt, result, name):
                         return [path, total_fee, total_delay, path_length, 'Failure']
                 mpc_passed_hops.add((u, v))
 
+                if not G.nodes[u].get("honest",True):
+                    failure += 1 
+                    update_reliability(G, source, v, success=False)
+                    return [path, total_fee, total_delay, path_length, 'Failure']
+
+                if not G.nodes[u].get("honest",True):
+                    failure += 1 
+                    update_reliability(G, source, v, success=False)
+                    return [path, total_fee, total_delay, path_length, 'Failure']
+
                 # even after the MPC check, if it fails, we provide them a bad rating. This will be true for dishonest node
                 if amount > G.edges[u, v]["Balance"] or amount <= 0:
                     failure += 1
@@ -627,7 +637,7 @@ def callable(source, target, amt, result, name):
             # reward nodes on the successful path (excluding sender)
             for node in path[1:]:
                 update_reliability(G, source, node, success=True)
-            print(G.nodes[source]["rating"])
+            #print(G.nodes[source]["rating"])
             return [path, total_fee, total_delay, path_length, 'Success']
         except Exception as e:
             print(e)

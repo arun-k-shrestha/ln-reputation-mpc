@@ -584,11 +584,18 @@ def callable(source, target, amt, result, name):
                 bal = G.edges[u, v]["Balance"]
                 cap = G.edges[u, v]["capacity"]
                 upper = cap + max(1, int(amount))
+
                 # important: we are not couting failure because this is pre-check not system failure.
                 if G.nodes[u].get("honest", True): # only checking honest node because the dishonest node will bypass this
                     if not Yao_MPC.Yao_Millionaires_Protocol(amount, bal, upper, 40):
                         # failure += 1 
                         return [path, total_fee, total_delay, path_length, 'Failure']
+                    
+                if not G.nodes[u].get("honest",True):
+                    failure += 1 
+                    update_reliability(G, source, v, success=False)
+                    return [path, total_fee, total_delay, path_length, 'Failure']
+                
                 mpc_passed_hops.add((u, v))
 
                 # even after the MPC check, if it fails, we provide them a bad rating. This will be true for dishonest node
@@ -613,7 +620,7 @@ def callable(source, target, amt, result, name):
             # reward nodes on the successful path (excluding sender)
             for node in path[1:]:
                 update_reliability(G, source, node, success=True)
-            print(G.nodes[source]["rating"])
+            #print(G.nodes[source]["rating"])
             return [path, total_fee, total_delay, path_length, 'Success']
         except Exception as e:
             print(e)
