@@ -546,7 +546,14 @@ def callable(source, target, amt, result, name):
             cost = float('inf')
         else:
             cost = penalty/prob
+
+            p_rep = get_reliability(G, source, v)  # v is the next-hop node being evaluated
+            p_rep = max(p_rep, 1e-6)
+            scale = 1/p_rep
+            cost *=scale
+
         dist = fee_dict[(u,v)] + G.edges[u,v]['Delay']*amt_dict[(u,v)]*rf
+        dist *=scale
         return dist, cost
     
      
