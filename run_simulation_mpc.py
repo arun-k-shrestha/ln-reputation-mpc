@@ -750,6 +750,7 @@ if __name__ == '__main__':
     total_failure = sum(f for (r, s, f) in a)
 
     print(total_success, total_failure)
+    print(total_success/(total_success+total_failure))
 
     # If you force only LND in work, then:
     # algos = ['LND']

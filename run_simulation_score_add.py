@@ -527,7 +527,7 @@ def callable(source, target, amt, result, name):
             p_rep = get_reliability(G, source, v)  # v is the next-hop node being evaluated
             p_rep = max(p_rep, 1e-6)
 
-            LAMBDA_REP = 1.0  # we can tune this??
+            LAMBDA_REP = 1.0  # we can tune this??  => Total valid transactions generated: 319 --> meaning the valid path is decreased
 
             rep_term = LAMBDA_REP * (-math.log(p_rep)) # or what happens if we try? LAMBDA_REP * (1.0 - p_rep)
 
